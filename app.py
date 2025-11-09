@@ -12,7 +12,9 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['DATABASE'] = 'database.db'
 
 # Load your trained model
-model = joblib.load('models/emotion_svm.pkl')
+data = joblib.load('models/emotion_svm.pkl')
+model = data['model'] if isinstance(data, dict) and 'model' in data else data
+
 
 # Emotion classes (modify to match your model)
 EMOTIONS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
