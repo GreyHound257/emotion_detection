@@ -1,75 +1,104 @@
-import sqlite3
-from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for
 import os
-import base64
-from flask import Flask, request, render_template, jsonify
-from PIL import Image
+import cv2
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.models import load_model
+from werkzeug.utils import secure_filename
+import sqlite3
+import base64
 
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'static/uploads'
+app.config['DATABASE'] = 'database.db'
 
-MODEL_PATH = "model.h5"
-CLASSES_PATH = "classes.npy"
-DB_PATH = "emotion_data.db"
+# Load your trained model
+model = load_model('model.h5')
 
-# Load model & classes
-model = tf.keras.models.load_model(MODEL_PATH)
-classes = np.load(CLASSES_PATH, allow_pickle=True).tolist()
+# Emotion classes (modify to match your model)
+EMOTIONS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
 
-if not os.path.exists(DB_PATH):
-    from init_database import init_db
-    init_db()
+# Ensure uploads directory exists
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Database helper
+# --- DATABASE SETUP ---
+def init_db():
+    with sqlite3.connect(app.config['DATABASE']) as conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            image_path TEXT,
+            emotion TEXT,
+            confidence REAL
+        )''')
+init_db()
+
 def save_to_db(name, image_path, emotion, confidence):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO users (name, timestamp, image_path, predicted_emotion, confidence) VALUES (?, ?, ?, ?, ?)",
-        (name, datetime.utcnow().isoformat(), image_path, emotion, confidence)
-    )
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(app.config['DATABASE']) as conn:
+        conn.execute("INSERT INTO users (name, image_path, emotion, confidence) VALUES (?, ?, ?, ?)",
+                     (name, image_path, emotion, confidence))
+        conn.commit()
 
-# Save base64 -> image
-def save_image(b64data):
-    os.makedirs("uploads", exist_ok=True)
-    header, encoded = b64data.split(",", 1)
-    data = base64.b64decode(encoded)
-    filename = f"uploads/{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}.jpg"
-    with open(filename, "wb") as f:
-        f.write(data)
-    return filename
+# --- IMAGE PREDICTION FUNCTION ---
+def predict_emotion(img_path):
+    img = cv2.imread(img_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
-def preprocess_image(img_path, size=(160,160)):
-    img = Image.open(img_path).convert("RGB").resize(size)
-    arr = np.asarray(img) / 255.0
-    return np.expand_dims(arr, axis=0)
+    if len(faces) == 0:
+        return "No Face Detected", 0.0
 
-@app.route("/")
+    (x, y, w, h) = faces[0]
+    face = gray[y:y+h, x:x+w]
+    face = cv2.resize(face, (48, 48)) / 255.0
+    face = np.expand_dims(face, axis=0)
+    face = np.expand_dims(face, axis=-1)
+
+    preds = model.predict(face)[0]
+    emotion = EMOTIONS[np.argmax(preds)]
+    confidence = np.max(preds) * 100
+    return emotion, confidence
+
+# --- ROUTES ---
+@app.route('/')
 def index():
-    return render_template("index.html")
+    return render_template('index.html')
 
-@app.route("/predict", methods=["POST"])
+@app.route('/predict', methods=['POST'])
 def predict():
-    payload = request.get_json()
-    if not payload or "image" not in payload:
-        return jsonify({"error": "No image provided"}), 400
+    name = request.form['name']
 
-    name = payload.get("name", "Anonymous")
-    image_b64 = payload["image"]
-    image_path = save_image(image_b64)
+    if 'image' in request.files:
+        file = request.files['image']
+        if file.filename == '':
+            return render_template('index.html', prediction="No file uploaded")
 
-    x = preprocess_image(image_path)
-    preds = model.predict(x)[0]
-    emotion = classes[np.argmax(preds)]
-    confidence = float(np.max(preds))
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
 
-    save_to_db(name, image_path, emotion, confidence)
+    elif 'captured_image' in request.form:
+        image_data = request.form['captured_image'].split(',')[1]
+        img_bytes = base64.b64decode(image_data)
+        filename = f"{name}_capture.jpg"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        with open(filepath, 'wb') as f:
+            f.write(img_bytes)
 
-    return jsonify({
-        "emotion": emotion,
-        "confidence": confidence,
-        "all": dict(zip(classes, map(float, preds)))
-    })
+    else:
+        return render_template('index.html', prediction="No image source found")
+
+    emotion, confidence = predict_emotion(filepath)
+    save_to_db(name, filename, emotion, confidence)
+
+    return render_template('index.html', prediction=emotion, confidence=confidence, image_file=filename)
+
+@app.route('/database')
+def database():
+    with sqlite3.connect(app.config['DATABASE']) as conn:
+        data = conn.execute("SELECT * FROM users").fetchall()
+    return render_template('database.html', data=data)
+
+if __name__ == '__main__':
+    app.run(debug=True)
