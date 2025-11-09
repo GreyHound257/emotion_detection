@@ -9,7 +9,7 @@ import joblib
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
-app.config['DATABASE'] = 'database.db'
+app.config['DATABASE'] = 'emotion_data.db'
 
 # Load your trained model
 data = joblib.load('models/emotion_svm.pkl')
@@ -28,17 +28,26 @@ def init_db():
         conn.execute('''CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
+            timestamp TEXT,
             image_path TEXT,
-            emotion TEXT,
+            predicted_emotion TEXT,
             confidence REAL
         )''')
+        conn.commit()
 init_db()
 
+
 def save_to_db(name, image_path, emotion, confidence):
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     with sqlite3.connect(app.config['DATABASE']) as conn:
-        conn.execute("INSERT INTO users (name, image_path, emotion, confidence) VALUES (?, ?, ?, ?)",
-                     (name, image_path, emotion, confidence))
+        conn.execute(
+            "INSERT INTO users (name, timestamp, image_path, predicted_emotion, confidence) VALUES (?, ?, ?, ?, ?)",
+            (name, timestamp, image_path, emotion, confidence)
+        )
         conn.commit()
+
 
 # --- IMAGE PREDICTION FUNCTION ---
 def predict_emotion(img_path):
