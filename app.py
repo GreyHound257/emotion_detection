@@ -7,13 +7,14 @@ from tensorflow.keras.models import load_model
 from werkzeug.utils import secure_filename
 import sqlite3
 import base64
+import joblib
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['DATABASE'] = 'database.db'
 
 # Load your trained model
-model = load_model('model.h5')
+model = joblib.load('models/emotion_svm.pkl')
 
 # Emotion classes (modify to match your model)
 EMOTIONS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
