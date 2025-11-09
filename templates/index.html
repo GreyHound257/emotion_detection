@@ -1,0 +1,111 @@
+<!-- templates/index.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Emotion Detection</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Emotion Detection Web App</h1>
+    <p>Upload an image or take a live photo.</p>
+
+    <div class="controls">
+      <input id="fileInput" type="file" accept="image/*">
+      <button id="captureBtn">Use Camera</button>
+    </div>
+
+    <div id="cameraArea" style="display:none;">
+      <video id="video" autoplay playsinline width="320"></video>
+      <button id="snap">Capture</button>
+      <button id="stopCamera">Stop Camera</button>
+    </div>
+
+    <div id="previewArea">
+      <img id="preview" src="" alt="" width="320" style="display:none;">
+    </div>
+
+    <div>
+      <input id="nameInput" placeholder="Your name (optional)">
+      <button id="sendBtn">Analyze</button>
+    </div>
+
+    <div id="result"></div>
+  </div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const sendBtn = document.getElementById('sendBtn');
+const nameInput = document.getElementById('nameInput');
+const resultDiv = document.getElementById('result');
+
+let currentDataUrl = null;
+
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    currentDataUrl = reader.result;
+    preview.src = currentDataUrl;
+    preview.style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('captureBtn').addEventListener('click', async () => {
+  document.getElementById('cameraArea').style.display = 'block';
+  const video = document.getElementById('video');
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  video.srcObject = stream;
+});
+
+document.getElementById('snap').addEventListener('click', () => {
+  const video = document.getElementById('video');
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  currentDataUrl = canvas.toDataURL('image/jpeg');
+  preview.src = currentDataUrl;
+  preview.style.display = 'block';
+});
+
+document.getElementById('stopCamera').addEventListener('click', () => {
+  const video = document.getElementById('video');
+  const stream = video.srcObject;
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+  document.getElementById('cameraArea').style.display = 'none';
+});
+
+sendBtn.addEventListener('click', async () => {
+  if (!currentDataUrl) {
+    alert('Please upload or take a picture first.');
+    return;
+  }
+  resultDiv.innerHTML = 'Analyzing...';
+  const payload = {
+    image: currentDataUrl,
+    name: nameInput.value || null
+  };
+  const res = await fetch('/predict', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (res.ok) {
+    resultDiv.innerHTML = `<h3>Detected: ${data.emotion} (${(data.confidence*100).toFixed(1)}%)</h3>
+      <pre>${JSON.stringify(data.all, null, 2)}</pre>`;
+  } else {
+    resultDiv.innerText = 'Error: ' + (data.error || 'Unknown');
+  }
+});
+</script>
+</body>
+</html>
