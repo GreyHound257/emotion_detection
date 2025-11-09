@@ -53,13 +53,23 @@ def predict_emotion(img_path):
     (x, y, w, h) = faces[0]
     face = gray[y:y+h, x:x+w]
     face = cv2.resize(face, (48, 48)) / 255.0
-    face = np.expand_dims(face, axis=0)
-    face = np.expand_dims(face, axis=-1)
 
-    preds = model.predict(face)[0]
-    emotion = EMOTIONS[np.argmax(preds)]
-    confidence = np.max(preds) * 100
+    # Flatten the face image into a 1D vector for the SVM
+    face = face.flatten().reshape(1, -1)
+
+    # Get prediction probabilities or decision function
+    if hasattr(model, "predict_proba"):
+        preds = model.predict_proba(face)[0]
+        emotion = EMOTIONS[np.argmax(preds)]
+        confidence = np.max(preds) * 100
+    else:
+        # For models like LinearSVC that don't have predict_proba
+        pred_label = model.predict(face)[0]
+        emotion = pred_label if isinstance(pred_label, str) else EMOTIONS[int(pred_label)]
+        confidence = 100.0  # we don't have probabilities here
+
     return emotion, confidence
+
 
 # --- ROUTES ---
 @app.route('/')
